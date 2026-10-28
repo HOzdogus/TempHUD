@@ -8,16 +8,19 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -26,21 +29,15 @@ import android.widget.TextView
 class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
-    private lateinit var batteryValue: TextView
-    private lateinit var cpuValue: TextView
-    private lateinit var gpuValue: TextView
-    private lateinit var heatValue: TextView
+    private val rows = mutableMapOf<String, TextView>()
     private lateinit var statusValue: TextView
     private lateinit var blockedNote: TextView
     private lateinit var sensorList: TextView
     private lateinit var overlayButton: Button
+    private lateinit var shizukuStatus: TextView
+    private lateinit var shizukuButton: Button
 
-    private val tick = object : Runnable {
-        override fun run() {
-            refresh()
-            handler.postDelayed(this, 2000L)
-        }
-    }
+    private val onStats: (Snapshot) -> Unit = { refresh(it) }
 
     private val bg = Color.parseColor("#0E1218")
     private val card = Color.parseColor("#1A212B")
@@ -66,28 +63,45 @@ class MainActivity : Activity() {
         }
 
         root.addView(text("TempHUD", 26f, Color.WHITE, bold = true))
-        root.addView(text("Live temperatures, refreshed every 2 seconds", 13f, muted))
+        root.addView(text("Live gaming stats, refreshed every second", 13f, muted))
         root.addView(space(16))
 
-        // Readings card
+        // ---- Live readings ----
         val readings = cardLayout()
-        batteryValue = addRow(readings, "Battery")
-        cpuValue = addRow(readings, "CPU")
-        gpuValue = addRow(readings, "GPU")
-        heatValue = addRow(readings, "Throttling")
+        for (def in StatList.all) {
+            if (def.key == "show_session" || def.key == "show_clock") continue
+            rows[def.key] = addRow(readings, def.label)
+        }
         statusValue = addRow(readings, "Thermal status")
         root.addView(readings)
 
         blockedNote = text(
-            "Your phone isn't letting apps read the CPU/GPU sensors directly. " +
-                "Throttling still works: it's Android's own estimate of how many degrees " +
-                "the phone can warm up before it slows itself down to cool off.",
-            13f, muted
+            "Your phone isn't letting apps read the CPU/GPU temperature sensors directly. " +
+                "Turning on Shizuku (below) usually fixes that.",
+            13f, muted,
         ).apply { visibility = View.GONE; setPadding(0, dp(8), 0, 0) }
         root.addView(blockedNote)
         root.addView(space(20))
 
-        // Overlay controls
+        // ---- Shizuku ----
+        root.addView(text("Extra stats with Shizuku", 18f, Color.WHITE, bold = true))
+        root.addView(space(8))
+        val shz = cardLayout()
+        shz.addView(
+            text(
+                "FPS, CPU and GPU usage and GPU clock speed are hidden from normal apps. " +
+                    "Shizuku (the same app PC Keyboard uses) unlocks them, and usually CPU/GPU temperatures too.",
+                13f, muted,
+            ),
+        )
+        shizukuStatus = text("", 14f, Color.WHITE, bold = true).apply { setPadding(0, dp(8), 0, dp(4)) }
+        shz.addView(shizukuStatus)
+        shizukuButton = Button(this).apply { setOnClickListener { shizukuAction() } }
+        shz.addView(shizukuButton)
+        root.addView(shz)
+        root.addView(space(20))
+
+        // ---- Overlay controls ----
         root.addView(text("Game overlay", 18f, Color.WHITE, bold = true))
         root.addView(space(8))
         overlayButton = Button(this).apply { setOnClickListener { toggleOverlay() } }
@@ -97,30 +111,53 @@ class MainActivity : Activity() {
         val prefs = Prefs.get(this)
         val options = cardLayout()
         options.addView(text("Show on overlay", 14f, muted))
-        listOf(
-            Prefs.SHOW_BATTERY to "Battery",
-            Prefs.SHOW_CPU to "CPU",
-            Prefs.SHOW_GPU to "GPU",
-            Prefs.SHOW_THERMAL to "Distance to throttling",
-        ).forEach { (key, label) ->
+        for (def in StatList.all) {
             options.addView(CheckBox(this).apply {
-                text = label
+                text = if (def.needsShizuku) "${def.label}  (Shizuku)" else def.label
                 setTextColor(Color.WHITE)
-                isChecked = prefs.getBoolean(key, true)
-                setOnCheckedChangeListener { _, checked ->
-                    prefs.edit().putBoolean(key, checked).apply()
-                }
+                isChecked = StatList.isOn(prefs, def.key)
+                setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean(def.key, checked).apply() }
             })
         }
         options.addView(space(8))
+        options.addView(CheckBox(this).apply {
+            text = "Show in one row (good for landscape)"
+            setTextColor(Color.WHITE)
+            isChecked = prefs.getBoolean(Prefs.HORIZONTAL, false)
+            setOnCheckedChangeListener { _, checked -> prefs.edit().putBoolean(Prefs.HORIZONTAL, checked).apply() }
+        })
+        options.addView(space(8))
         options.addView(slider("Background opacity", Prefs.OPACITY, 70, 20, 100, "%"))
         options.addView(slider("Text size", Prefs.TEXT_SIZE, 12, 9, 20, "sp"))
+        options.addView(space(8))
+        options.addView(text("Ping server", 14f, Color.WHITE))
+        options.addView(EditText(this).apply {
+            setText(prefs.getString(Prefs.PING_HOST, Prefs.DEFAULT_PING_HOST))
+            setTextColor(Color.WHITE)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            isSingleLine = true
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    prefs.edit().putString(Prefs.PING_HOST, s?.toString()?.trim().orEmpty()).apply()
+                }
+            })
+        })
+        options.addView(
+            text(
+                "1.1.1.1 (Cloudflare) is a good general test. For Shadow PC or an online game, " +
+                    "put in its server address instead.",
+                12f, muted,
+            ),
+        )
+        options.addView(space(6))
         options.addView(text("Tip: drag the overlay to move it. It remembers where you leave it.", 12f, muted))
         root.addView(options)
         root.addView(space(20))
 
-        // Every readable sensor, for the curious
-        root.addView(text("All readable sensors", 18f, Color.WHITE, bold = true))
+        // ---- Every readable sensor ----
+        root.addView(text("All readable temperature sensors", 18f, Color.WHITE, bold = true))
         root.addView(space(8))
         sensorList = text("", 12f, muted).apply { typeface = Typeface.MONOSPACE }
         root.addView(cardLayout().apply { addView(sensorList) })
@@ -131,63 +168,110 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        handler.post(tick)
-        updateButton()
+        ShizukuStats.start()
+        Stats.subscribe(this, onStats)
+        updateButtons()
     }
 
     override fun onPause() {
-        handler.removeCallbacks(tick)
+        Stats.unsubscribe(onStats)
         super.onPause()
     }
 
-    private fun refresh() {
-        val s = ThermalReader.read(this)
-        batteryValue.text = Format.deg(s.batteryC) + (s.batteryPct?.let { "  ($it%)" } ?: "")
-        batteryValue.setTextColor(Format.colourFor(s.batteryC, 40f, 45f))
-        cpuValue.text = Format.deg(s.cpuC)
-        cpuValue.setTextColor(Format.colourFor(s.cpuC, 70f, 85f))
-        gpuValue.text = Format.deg(s.gpuC)
-        gpuValue.setTextColor(Format.colourFor(s.gpuC, 70f, 85f))
-        heatValue.text = Format.headroomText(s.headroom)
-        heatValue.setTextColor(Format.headroomColour(s.headroom))
-        statusValue.text = ThermalReader.statusLabel(s.thermalStatus)
-
-        blockedNote.visibility = if (s.cpuC == null || s.gpuC == null) View.VISIBLE else View.GONE
-
+    private fun refresh(s: Snapshot) {
+        val shizuku = ShizukuStats.ready()
+        for (line in Format.lines(s, shizuku, OverlayService.startedAt)) {
+            val tv = rows[line.key] ?: continue
+            tv.text = line.value
+            tv.setTextColor(line.colour)
+        }
+        statusValue.text = ThermalLabels.status(s.thermalStatus)
+        blockedNote.visibility = if ((s.cpuC == null || s.gpuC == null) && !shizuku) View.VISIBLE else View.GONE
         sensorList.text = if (s.zones.isEmpty()) {
-            "No sensors are readable on this phone."
+            "None are readable directly on this phone." + if (shizuku) " (Using Android's thermal service through Shizuku instead.)" else ""
         } else {
             s.zones.joinToString("\n") { z -> "%-24s %s".format(z.name.take(24), Format.deg(z.celsius)) }
         }
-        updateButton()
+        updateButtons()
     }
 
-    private fun toggleOverlay() {
-        if (OverlayService.running) {
-            stopService(Intent(this, OverlayService::class.java))
-            handler.postDelayed({ updateButton() }, 300)
-            return
-        }
-        if (!Settings.canDrawOverlays(this)) {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-            )
-            return
-        }
-        startForegroundService(Intent(this, OverlayService::class.java))
-        handler.postDelayed({ updateButton() }, 300)
-    }
-
-    private fun updateButton() {
+    private fun updateButtons() {
         overlayButton.text = when {
             OverlayService.running -> "Hide overlay"
             !Settings.canDrawOverlays(this) -> "Allow overlay permission"
             else -> "Show overlay"
         }
+        when (ShizukuStats.state(this)) {
+            ShizukuStats.State.READY -> {
+                shizukuStatus.text = "✓ Connected. Extra stats are on."
+                shizukuStatus.setTextColor(Format.GREEN)
+                shizukuButton.visibility = View.GONE
+            }
+            ShizukuStats.State.CONNECTING -> {
+                shizukuStatus.text = "Connecting…"
+                shizukuStatus.setTextColor(Format.AMBER)
+                shizukuButton.visibility = View.GONE
+                ShizukuStats.connect()
+            }
+            ShizukuStats.State.NO_PERMISSION -> {
+                shizukuStatus.text = "Shizuku is running. Allow TempHUD to use it."
+                shizukuStatus.setTextColor(Format.AMBER)
+                shizukuButton.text = "Allow"
+                shizukuButton.visibility = View.VISIBLE
+            }
+            ShizukuStats.State.NOT_RUNNING -> {
+                shizukuStatus.text = "Shizuku isn't running. Start it with Wireless debugging."
+                shizukuStatus.setTextColor(Format.AMBER)
+                shizukuButton.text = "Open Shizuku"
+                shizukuButton.visibility = View.VISIBLE
+            }
+            ShizukuStats.State.NOT_INSTALLED -> {
+                shizukuStatus.text = "Shizuku isn't installed."
+                shizukuStatus.setTextColor(muted)
+                shizukuButton.text = "Get Shizuku"
+                shizukuButton.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    private fun shizukuAction() {
+        when (ShizukuStats.state(this)) {
+            ShizukuStats.State.NO_PERMISSION -> ShizukuStats.requestPermission()
+            ShizukuStats.State.NOT_RUNNING -> {
+                val launch = packageManager.getLaunchIntentForPackage(ShizukuStats.SHIZUKU_PACKAGE)
+                if (launch != null) startActivity(launch) else openStore()
+            }
+            ShizukuStats.State.NOT_INSTALLED -> openStore()
+            else -> Unit
+        }
+    }
+
+    private fun openStore() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${ShizukuStats.SHIZUKU_PACKAGE}")))
+        } catch (e: Exception) {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=${ShizukuStats.SHIZUKU_PACKAGE}")),
+            )
+        }
+    }
+
+    private fun toggleOverlay() {
+        if (OverlayService.running) {
+            stopService(Intent(this, OverlayService::class.java))
+            handler.postDelayed({ updateButtons() }, 300)
+            return
+        }
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            return
+        }
+        startForegroundService(Intent(this, OverlayService::class.java))
+        handler.postDelayed({ updateButtons() }, 300)
     }
 
     private fun askForNotifications() {
-        if (Build.VERSION.SDK_INT >= 33 &&
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
@@ -222,12 +306,12 @@ class MainActivity : Activity() {
     private fun addRow(parent: LinearLayout, label: String): TextView {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(6), 0, dp(6))
+            setPadding(0, dp(5), 0, dp(5))
         }
-        row.addView(text(label, 16f, muted).apply {
+        row.addView(text(label, 15f, muted).apply {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
-        val value = text("…", 18f, Color.WHITE, bold = true)
+        val value = text("…", 16f, Color.WHITE, bold = true)
         row.addView(value)
         parent.addView(row)
         return value
@@ -248,6 +332,7 @@ class MainActivity : Activity() {
                     title.text = "$label: $value$unit"
                     prefs.edit().putInt(key, value).apply()
                 }
+
                 override fun onStartTrackingTouch(bar: SeekBar) {}
                 override fun onStopTrackingTouch(bar: SeekBar) {}
             })

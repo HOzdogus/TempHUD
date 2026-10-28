@@ -34,6 +34,11 @@ class OverlayService : Service() {
         @Volatile
         var running = false
             private set
+
+        /** When the overlay was switched on (elapsedRealtime), for the session timer. */
+        @Volatile
+        var startedAt: Long? = null
+            private set
     }
 
     private var windowManager: WindowManager? = null
@@ -41,12 +46,7 @@ class OverlayService : Service() {
     private lateinit var params: WindowManager.LayoutParams
     private val handler = Handler(Looper.getMainLooper())
 
-    private val tick = object : Runnable {
-        override fun run() {
-            refresh()
-            handler.postDelayed(this, REFRESH_MS)
-        }
-    }
+    private val onStats: (Snapshot) -> Unit = { refresh(it) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -58,8 +58,9 @@ class OverlayService : Service() {
             return
         }
         running = true
+        startedAt = android.os.SystemClock.elapsedRealtime()
         showOverlay()
-        handler.post(tick)
+        Stats.subscribe(this, onStats)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,7 +73,8 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         running = false
-        handler.removeCallbacks(tick)
+        startedAt = null
+        Stats.unsubscribe(onStats)
         overlay?.let { v -> windowManager?.removeView(v) }
         overlay = null
         super.onDestroy()
@@ -154,11 +156,10 @@ class OverlayService : Service() {
         }
     }
 
-    private fun refresh() {
+    private fun refresh(snapshot: Snapshot) {
         val v = overlay ?: return
         applyStyle()
-        val snapshot = ThermalReader.read(this)
-        v.text = Format.overlayText(snapshot, Prefs.get(this))
+        v.text = Format.overlayText(snapshot, Prefs.get(this), ShizukuStats.ready(), startedAt)
     }
 
     private fun dp(value: Int): Int =

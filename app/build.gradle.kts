@@ -11,8 +11,8 @@ android {
         applicationId = "com.hozdogus.temphud"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
 
     // A fixed key committed to the repo, so every CI build is signed the same
@@ -34,4 +34,15 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    buildFeatures {
+        aidl = true
+    }
+}
+
+dependencies {
+    // Shizuku unlocks FPS, CPU/GPU usage and GPU clock, which Android hides from normal apps.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:4.3")
 }
