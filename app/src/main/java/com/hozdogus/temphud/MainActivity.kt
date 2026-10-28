@@ -74,14 +74,14 @@ class MainActivity : Activity() {
         batteryValue = addRow(readings, "Battery")
         cpuValue = addRow(readings, "CPU")
         gpuValue = addRow(readings, "GPU")
-        heatValue = addRow(readings, "Heat level")
+        heatValue = addRow(readings, "Throttling")
         statusValue = addRow(readings, "Thermal status")
         root.addView(readings)
 
         blockedNote = text(
             "Your phone isn't letting apps read the CPU/GPU sensors directly. " +
-                "Heat level still works: it's Android's own measure of how close the phone " +
-                "is to slowing down to cool off (100% = throttling).",
+                "Throttling still works: it's Android's own estimate of how many degrees " +
+                "the phone can warm up before it slows itself down to cool off.",
             13f, muted
         ).apply { visibility = View.GONE; setPadding(0, dp(8), 0, 0) }
         root.addView(blockedNote)
@@ -101,7 +101,7 @@ class MainActivity : Activity() {
             Prefs.SHOW_BATTERY to "Battery",
             Prefs.SHOW_CPU to "CPU",
             Prefs.SHOW_GPU to "GPU",
-            Prefs.SHOW_THERMAL to "Heat level",
+            Prefs.SHOW_THERMAL to "Distance to throttling",
         ).forEach { (key, label) ->
             options.addView(CheckBox(this).apply {
                 text = label

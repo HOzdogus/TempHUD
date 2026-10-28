@@ -37,14 +37,23 @@ object Format {
         else -> GREEN
     }
 
-    fun headroomColour(h: Float?): Int = when {
-        h == null -> GREY
-        h >= 0.9f -> RED
-        h >= 0.7f -> AMBER
-        else -> GREEN
+    // Android scales headroom so 0.0 is ~30°C below the throttling point and
+    // 1.0 is the throttling point, so convert it to degrees left before throttling.
+    fun degreesToThrottle(h: Float?): Float? = h?.let { ((1f - it) * 30f).coerceAtLeast(0f) }
+
+    fun headroomColour(h: Float?): Int {
+        val d = degreesToThrottle(h) ?: return GREY
+        return when {
+            d <= 2f -> RED
+            d <= 5f -> AMBER
+            else -> GREEN
+        }
     }
 
-    fun headroomText(h: Float?): String = if (h == null) "n/a" else "${(h * 100).toInt()}%"
+    fun headroomText(h: Float?): String {
+        val d = degreesToThrottle(h) ?: return "n/a"
+        return if (d <= 0f) "throttling" else String.format(Locale.UK, "%.1f°C away", d)
+    }
 
     /** Builds the coloured multi-line text used by the overlay. */
     fun overlayText(s: Snapshot, p: SharedPreferences): CharSequence {
@@ -63,7 +72,7 @@ object Format {
         if (p.getBoolean(Prefs.SHOW_CPU, true)) line("CPU ", deg(s.cpuC), colourFor(s.cpuC, 70f, 85f))
         if (p.getBoolean(Prefs.SHOW_GPU, true)) line("GPU ", deg(s.gpuC), colourFor(s.gpuC, 70f, 85f))
         if (p.getBoolean(Prefs.SHOW_THERMAL, true)) {
-            line("HEAT ", headroomText(s.headroom), headroomColour(s.headroom))
+            line("THROTTLE ", headroomText(s.headroom), headroomColour(s.headroom))
         }
         if (sb.isEmpty()) sb.append("TempHUD")
         return sb
