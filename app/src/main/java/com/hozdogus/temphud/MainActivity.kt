@@ -156,6 +156,38 @@ class MainActivity : Activity() {
         root.addView(options)
         root.addView(space(20))
 
+        // ---- Hot apps ----
+        root.addView(text("Hot apps", 18f, Color.WHITE, bold = true))
+        root.addView(space(8))
+        val hot = cardLayout()
+        hot.addView(
+            text(
+                "TempHUD logs temperatures in the background along with whichever app is open, " +
+                    "then ranks the apps that heat your phone up the most.",
+                13f, muted,
+            )
+        )
+        hot.addView(space(6))
+        hot.addView(CheckBox(this).apply {
+            text = "Log temperatures in the background"
+            setTextColor(Color.WHITE)
+            isChecked = HeatLogService.isEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean(Prefs.HEAT_LOG_ON, checked).apply()
+                if (checked) {
+                    HeatLogService.startIfEnabled(this@MainActivity)
+                } else {
+                    stopService(Intent(this@MainActivity, HeatLogService::class.java))
+                }
+            }
+        })
+        hot.addView(Button(this).apply {
+            text = "See hot apps"
+            setOnClickListener { startActivity(Intent(this@MainActivity, HotAppsActivity::class.java)) }
+        })
+        root.addView(hot)
+        root.addView(space(20))
+
         // ---- Every readable sensor ----
         root.addView(text("All readable temperature sensors", 18f, Color.WHITE, bold = true))
         root.addView(space(8))
@@ -171,6 +203,7 @@ class MainActivity : Activity() {
         ShizukuStats.start()
         Stats.subscribe(this, onStats)
         updateButtons()
+        HeatLogService.startIfEnabled(this)
     }
 
     override fun onPause() {

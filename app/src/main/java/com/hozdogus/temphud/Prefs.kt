@@ -23,6 +23,7 @@ object Prefs {
     const val HORIZONTAL = "horizontal"
     const val PING_HOST = "ping_host"
     const val DEFAULT_PING_HOST = "1.1.1.1"
+    const val HEAT_LOG_ON = "heat_log_on"
 
     fun get(context: Context): SharedPreferences =
         context.getSharedPreferences("temphud", Context.MODE_PRIVATE)

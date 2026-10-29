@@ -59,8 +59,11 @@ data class Snapshot(
     val gpuMhz: Int?,
 )
 
-/** Reads every stat. Keeps a little history so it can work out rates (FPS, usage, ping). */
-class Sampler(private val app: Context) {
+/**
+ * Reads every stat. Keeps a little history so it can work out rates (FPS, usage, ping).
+ * [light] skips the network, clock and Shizuku-only stats, for cheap background logging.
+ */
+class Sampler(private val app: Context, private val light: Boolean = false) {
 
     private var lastFrames: Int? = null
     private var lastFramesAt = 0L
@@ -113,7 +116,7 @@ class Sampler(private val app: Context) {
         val zones = readZones()
         var cpuC = zones.filter { isCpu(it.name) }.maxOfOrNull { it.celsius }
         var gpuC = zones.filter { isGpu(it.name) }.maxOfOrNull { it.celsius }
-        if (shizuku && (cpuC == null || gpuC == null) && tickCount % 3 == 1) readHalTemps()
+        if (shizuku && (cpuC == null || gpuC == null) && (light || tickCount % 3 == 1)) readHalTemps()
         if (cpuC == null) cpuC = halCpu
         if (gpuC == null) gpuC = halGpu
 
@@ -129,16 +132,16 @@ class Sampler(private val app: Context) {
         val ramUsed = if (mi.totalMem > 0) (mi.totalMem - mi.availMem) / gb else null
 
         // ---- CPU clocks ----
-        val (cpuGhz, cpuMaxGhz) = readCpuClocks(shizuku)
+        val (cpuGhz, cpuMaxGhz) = if (light) Pair(null, null) else readCpuClocks(shizuku)
 
         // ---- network ----
-        val (onWifi, dbm, mbps) = readWifi()
-        if (tickCount % 2 == 0) startPing()
+        val (onWifi, dbm, mbps) = if (light) WifiNow(false, null, null) else readWifi()
+        if (!light && tickCount % 2 == 0) startPing()
 
         // ---- Shizuku-only stats ----
-        val fps = if (shizuku) readFps() else null
-        val cpuUsage = if (shizuku) readCpuUsage() else null
-        val (gpuUsage, gpuMhz) = readGpu(shizuku)
+        val fps = if (shizuku && !light) readFps() else null
+        val cpuUsage = if (shizuku && !light) readCpuUsage() else null
+        val (gpuUsage, gpuMhz) = if (light) Pair(null, null) else readGpu(shizuku)
 
         return Snapshot(
             batteryC = batteryC, batteryPct = pct, cpuC = cpuC, gpuC = gpuC,
